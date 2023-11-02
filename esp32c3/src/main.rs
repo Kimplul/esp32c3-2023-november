@@ -15,8 +15,11 @@ mod app {
         prelude::*
     };
 
+    use shared::Command;
+
     #[shared]
     struct Shared {
+        cmd: Option<Command>
     }
 
     #[local]
@@ -33,6 +36,36 @@ mod app {
         let clocks = ClockControl::max(system.clock_control).freeze();
 
         rprintln!("init works");
-        (Shared{}, Local{})
+        let cmd: Option<Command> = None;
+
+        (Shared{cmd}, Local{})
+    }
+
+    #[task(binds = UART0, shared = [cmd])]
+    fn aggregate(cx: aggregate::Context) {
+    }
+
+    #[task(shared = [cmd])]
+    async fn broker(cx: broker::Context) {
+    }
+
+    #[task]
+    async fn set_blink_data(cx: set_blink_data::Context) {
+    }
+
+    #[task]
+    async fn set_rgb_data(cx: set_rgb_data::Context) {
+    }
+
+    #[task]
+    async fn set_date_time(cx: set_date_time::Context) {
+    }
+
+    #[task]
+    async fn blink(cx: blink::Context) {
+    }
+
+    #[task]
+    async fn update_rgb(cx: update_rgb::Context) {
     }
 }
