@@ -20,7 +20,7 @@ mod app {
         Uart, IO,
     };
 
-    use shared::{Command, Ack,
+    use shared::{Command, BlinkerOptions, Ack,
     OUT_SIZE, IN_SIZE,
     deserialize_crc_cobs, serialize_crc_cobs};
 
@@ -107,9 +107,16 @@ mod app {
             deserialize_crc_cobs::<Command>(cmd)
         });
 
-        let ack = match cmd {
-            Err(_) => {rprintln!("invalid command"); Ack::NotOk}
-            Ok(c) =>  {rprintln!("valid command: {:?}", c); Ack::Ok}
+        let ack = if let Ok(cmd) = cmd {
+            match cmd {
+                Command::SetBlinker(options) => {set_blink_data::spawn(options).unwrap();}
+                _ => {}
+            }
+            Ack::Ok
+
+        } else {
+            cmd.unwrap_err();
+            Ack::NotOk
         };
 
         let mut buf: [u8; IN_SIZE] = [0; IN_SIZE];
@@ -119,7 +126,8 @@ mod app {
     }
 
     #[task()]
-    async fn set_blink_data(cx: set_blink_data::Context) {
+    async fn set_blink_data(cx: set_blink_data::Context, options: BlinkerOptions) {
+        rprintln!("set_blink_data");
     }
 
     #[task()]
