@@ -7,8 +7,8 @@ pub type Id = u32;
 pub type DevId = u32;
 pub type Parameter = u32;
 
-use corncobs::max_encoded_len;
 use core::mem::size_of;
+use corncobs::max_encoded_len;
 
 pub const IN_SIZE: usize = max_encoded_len(size_of::<Ack>() + size_of::<u32>());
 pub const OUT_SIZE: usize = max_encoded_len(size_of::<Command>() + size_of::<u32>());
@@ -22,7 +22,7 @@ pub enum Command {
     RgbOff,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum BlinkerOptions {
     Off,
     On {
@@ -32,7 +32,7 @@ pub enum BlinkerOptions {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum DateTime {
     Now,
     Utc(u64),

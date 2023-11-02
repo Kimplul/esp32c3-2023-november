@@ -11,6 +11,7 @@ mod app {
     use esp32c3_hal::{
         self as _,
         clock::ClockControl,
+        gpio::{Gpio7, Output, PushPull},
         peripherals::{Peripherals, TIMG0, UART0},
         prelude::*,
         timer::{Timer, Timer0, TimerGroup},
@@ -76,6 +77,7 @@ mod app {
         uart_rx: UartRx<'static, UART0>,
         uart_tx: UartTx<'static, UART0>,
         cmd_idx: usize,
+        led: Gpio7<Output<PushPull>>,
     }
 
     #[init]
@@ -123,6 +125,8 @@ mod app {
         let mut timer0 = timer_group0.timer0;
         timer0.listen();
 
+        let led = io.pins.gpio7.into_push_pull_output();
+
         rprintln!("init works");
 
         (
@@ -138,6 +142,7 @@ mod app {
                 uart_rx,
                 uart_tx,
                 cmd_idx: 0,
+                led,
             },
         )
     }
@@ -235,19 +240,28 @@ mod app {
             .lock(|reference_times| reference_times.update(new_time, rtc_ref));
     }
 
-    #[task(binds = TG0_T0_LEVEL, shared=[timer0, blink_data], priority=1)]
+    #[task(binds = TG0_T0_LEVEL,local=[led], shared=[timer0, blink_data], priority=1)]
     fn blink(mut cx: blink::Context) {
         rprintln!("Inside blink task");
         cx.shared.timer0.lock(|t| t.clear_interrupt());
 
-        let dur = cx.shared.blink_data.lock(|d| match d {
-            BlinkerOptions::Off => todo!(),
+        let opts: BlinkerOptions = cx.shared.blink_data.lock(|d| *d);
+
+        match opts {
+            BlinkerOptions::Off => {
+                cx.local.led.set_low().expect("Failed to turn off the led");
+            }
             BlinkerOptions::On {
                 date_time,
                 freq,
                 duration,
-            } => todo!(),
-        });
+            } => {
+                let dur = ((1 as f32 / freq as f32) * 1000f32) as u32;
+
+                cx.local.led.toggle().expect("Led toggle failed");
+                cx.shared.timer0.lock(|t| t.start(dur.millis()));
+            }
+        }
     }
 
     #[task()]
