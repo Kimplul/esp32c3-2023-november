@@ -49,7 +49,7 @@ fn main() -> Result<(), std::io::Error> {
             .read_line(&mut input)
             .expect("Failed to read input");
 
-        let task: u32 = match input.trim().parse() {
+        let command: u32 = match input.trim().parse() {
             Ok(num) => num,
             Err(_) => {
                 println!("Invalid input");
@@ -57,38 +57,20 @@ fn main() -> Result<(), std::io::Error> {
             }
         };
 
-        match task {
-            1 => {
-                let response = request(&Command::RgbOn, &mut port, &mut out_buf, &mut in_buf)?;
-            }
-            2 => {
-                let response = request(&Command::RgbOff, &mut port, &mut out_buf, &mut in_buf)?;
-            }
-            3 => {
-                let response = request(
-                    &Command::SetBlinker(shared::BlinkerOptions::On {
-                        date_time: shared::DateTime::Now,
-                        freq: 2,
-                        duration: 100,
-                    }),
-                    &mut port,
-                    &mut out_buf,
-                    &mut in_buf,
-                )?;
-            }
-            4 => {
-                let response = request(
-                    &Command::SetDateTime(shared::DateTime::Utc(
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs() as u64,
-                    )),
-                    &mut port,
-                    &mut out_buf,
-                    &mut in_buf,
-                )?;
-            }
+        let task = match command {
+            1 => Command::RgbOn,
+            2 => Command::RgbOff,
+            3 => Command::SetBlinker(shared::BlinkerOptions::On {
+                date_time: shared::DateTime::Now,
+                freq: 2,
+                duration: 100,
+            }),
+            4 => Command::SetDateTime(shared::DateTime::Utc(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as u64,
+            )),
             5 => {
                 break;
             }
@@ -96,7 +78,9 @@ fn main() -> Result<(), std::io::Error> {
                 println!("Invalid task selected");
                 continue;
             }
-        }
+        };
+
+        let response = request(&task, &mut port, &mut out_buf, &mut in_buf)?;
     }
 
     Ok(())
