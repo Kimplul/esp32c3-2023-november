@@ -12,24 +12,33 @@ pub type Parameter = u32;
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub enum Command {
-    Set(Id, Message, DevId),
-    Get(Id, Parameter, DevId),
+    SetBlinker(BlinkerOptions),
+    SetDateTime(DateTime),
+    RgbOn,
+    RgbOff,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[repr(C)]
-pub enum Message {
-    A,
-    B(u32),
-    C(f32), // we might consider "f16" but not sure it plays well with `ssmarshal`
+pub enum BlinkerOptions {
+    Off,
+    On {
+        date_time: DateTime,
+        freq: u64,
+        duration: u64,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[repr(C)]
-pub enum Response {
-    Data(Id, Parameter, u32, DevId),
-    SetOk,
-    ParseError,
+pub enum DateTime {
+    Now,
+    Utc(u64),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Ack {
+    Ok,
+    Recovered,
+    NotOk,
 }
 
 pub const CKSUM: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
