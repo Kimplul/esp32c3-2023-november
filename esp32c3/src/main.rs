@@ -21,7 +21,8 @@ mod app {
     };
 
     use shared::{
-        deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, IN_SIZE, OUT_SIZE,
+        deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
+        OUT_SIZE,
     };
 
     #[derive(Debug)]
@@ -35,6 +36,7 @@ mod app {
         cmd: [u8; OUT_SIZE],
         rgb_state: RgbState,
         blink_data: BlinkerOptions,
+        reference_time: DateTime,
     }
 
     #[local]
@@ -87,6 +89,7 @@ mod app {
                 blink_data: BlinkerOptions::Off,
                 cmd: [0; OUT_SIZE],
                 rgb_state: RgbState::Off,
+                reference_time: DateTime::Now,
             },
             Local {
                 uart_rx,
@@ -130,7 +133,7 @@ mod app {
                 Command::SetBlinker(options) => {
                     set_blink_data::spawn(options).unwrap();
                 }
-                Command::SetDateTime(_) => set_date_time::spawn().unwrap(),
+                Command::SetDateTime(t) => set_date_time::spawn(t).unwrap(),
                 Command::RgbOn => update_rgb_data::spawn(RgbState::On).unwrap(),
                 Command::RgbOff => update_rgb_data::spawn(RgbState::Off).unwrap(),
             }
@@ -159,11 +162,15 @@ mod app {
         rprintln!("Inside update rgb task");
         cx.shared.rgb_state.lock(|rgb_state| {
             *rgb_state = state;
-        })
+        });
     }
 
-    #[task()]
-    async fn set_date_time(cx: set_date_time::Context) {}
+    #[task(shared = [reference_time])]
+    async fn set_date_time(mut cx: set_date_time::Context, new_time: DateTime) {
+        cx.shared
+            .reference_time
+            .lock(|reference_time| *reference_time = new_time);
+    }
 
     #[task()]
     async fn blink(cx: blink::Context) {}
