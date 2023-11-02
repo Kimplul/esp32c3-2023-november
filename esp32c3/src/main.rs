@@ -17,7 +17,7 @@ mod app {
             config::{Config, DataBits, Parity, StopBits},
             TxRxPins, UartRx, UartTx,
         },
-        Uart, IO,
+        Rtc, Uart, IO,
     };
 
     use shared::{
@@ -31,12 +31,42 @@ mod app {
         Off,
     }
 
+    pub struct ReferenceTimes {
+        utc_reference: u64,
+        rtc_reference: u64,
+    }
+
+    impl ReferenceTimes {
+        fn update(&mut self, utc_ref: u64, rtc_ref: u64) {
+            self.rtc_reference = rtc_ref;
+            self.utc_reference = utc_ref;
+        }
+
+        pub fn get_time(&mut self, rtc_now: u64) -> u64 {
+            self.utc_reference + (rtc_now - self.rtc_reference) / 1000
+        }
+
+        pub fn new() -> Self {
+            ReferenceTimes {
+                utc_reference: 0,
+                rtc_reference: 0,
+            }
+        }
+    }
+
+    impl Default for ReferenceTimes {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     #[shared]
     struct Shared {
         cmd: [u8; OUT_SIZE],
         rgb_state: RgbState,
         blink_data: BlinkerOptions,
-        reference_time: DateTime,
+        reference_times: ReferenceTimes,
+        rtc: Rtc<'static>,
     }
 
     #[local]
@@ -89,7 +119,8 @@ mod app {
                 blink_data: BlinkerOptions::Off,
                 cmd: [0; OUT_SIZE],
                 rgb_state: RgbState::Off,
-                reference_time: DateTime::Now,
+                reference_times: ReferenceTimes::new(),
+                rtc: Rtc::new(peripherals.RTC_CNTL),
             },
             Local {
                 uart_rx,
@@ -132,12 +163,25 @@ mod app {
             match cmd {
                 Command::SetBlinker(options) => {
                     set_blink_data::spawn(options).unwrap();
+                    Ack::Ok
                 }
-                Command::SetDateTime(t) => set_date_time::spawn(t).unwrap(),
-                Command::RgbOn => update_rgb_data::spawn(RgbState::On).unwrap(),
-                Command::RgbOff => update_rgb_data::spawn(RgbState::Off).unwrap(),
+                Command::SetDateTime(t) => {
+                    if let DateTime::Utc(time) = t {
+                        set_date_time::spawn(time).unwrap();
+                        Ack::Ok
+                    } else {
+                        Ack::NotOk
+                    }
+                }
+                Command::RgbOn => {
+                    update_rgb_data::spawn(RgbState::On).unwrap();
+                    Ack::Ok
+                }
+                Command::RgbOff => {
+                    update_rgb_data::spawn(RgbState::Off).unwrap();
+                    Ack::Ok
+                }
             }
-            Ack::Ok
         } else {
             cmd.unwrap_err();
             Ack::NotOk
@@ -165,12 +209,15 @@ mod app {
         });
     }
 
-    #[task(shared = [reference_time])]
-    async fn set_date_time(mut cx: set_date_time::Context, new_time: DateTime) {
+    #[task(shared = [reference_times, rtc])]
+    async fn set_date_time(mut cx: set_date_time::Context, new_time: u64) {
         rprintln!("set_date_time {:?}", new_time);
+
+        let rtc_ref = cx.shared.rtc.lock(|r| r.get_time_ms());
+
         cx.shared
-            .reference_time
-            .lock(|reference_time| *reference_time = new_time);
+            .reference_times
+            .lock(|reference_times| reference_times.update(new_time, rtc_ref));
     }
 
     #[task()]
