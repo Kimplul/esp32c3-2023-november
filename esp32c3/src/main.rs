@@ -167,6 +167,7 @@ mod app {
 
     #[task(shared = [reference_time])]
     async fn set_date_time(mut cx: set_date_time::Context, new_time: DateTime) {
+        rprintln!("set_date_time {:?}", new_time);
         cx.shared
             .reference_time
             .lock(|reference_time| *reference_time = new_time);
