@@ -11,8 +11,9 @@ mod app {
     use esp32c3_hal::{
         self as _,
         clock::ClockControl,
-        peripherals::{Peripherals, UART0},
+        peripherals::{Peripherals, TIMG0, UART0},
         prelude::*,
+        timer::{Timer, Timer0, TimerGroup},
         uart::{
             config::{Config, DataBits, Parity, StopBits},
             TxRxPins, UartRx, UartTx,
@@ -67,6 +68,7 @@ mod app {
         blink_data: BlinkerOptions,
         reference_times: ReferenceTimes,
         rtc: Rtc<'static>,
+        timer0: Timer<Timer0<TIMG0>>,
     }
 
     #[local]
@@ -112,6 +114,15 @@ mod app {
 
         let (uart_tx, uart_rx) = uart0.split();
 
+        let timer_group0 = TimerGroup::new(
+            peripherals.TIMG0,
+            &clocks,
+            &mut system.peripheral_clock_control,
+        );
+
+        let mut timer0 = timer_group0.timer0;
+        timer0.listen();
+
         rprintln!("init works");
 
         (
@@ -121,6 +132,7 @@ mod app {
                 rgb_state: RgbState::Off,
                 reference_times: ReferenceTimes::new(),
                 rtc: Rtc::new(peripherals.RTC_CNTL),
+                timer0,
             },
             Local {
                 uart_rx,
@@ -161,17 +173,10 @@ mod app {
 
         let ack = if let Ok(cmd) = cmd {
             match cmd {
+                Command::SetDateTime(t) => handle_new_datetime(t),
                 Command::SetBlinker(options) => {
                     set_blink_data::spawn(options).unwrap();
                     Ack::Ok
-                }
-                Command::SetDateTime(t) => {
-                    if let DateTime::Utc(time) = t {
-                        set_date_time::spawn(time).unwrap();
-                        Ack::Ok
-                    } else {
-                        Ack::NotOk
-                    }
                 }
                 Command::RgbOn => {
                     update_rgb_data::spawn(RgbState::On).unwrap();
@@ -193,12 +198,22 @@ mod app {
         let _ = cx.local.uart_tx.write_bytes(&buf);
     }
 
-    #[task(shared = [blink_data])]
+    fn handle_new_datetime(time: DateTime) -> Ack {
+        if let DateTime::Utc(t) = time {
+            set_date_time::spawn(t).unwrap();
+            Ack::Ok
+        } else {
+            Ack::NotOk
+        }
+    }
+
+    #[task(shared = [blink_data, timer0])]
     async fn set_blink_data(mut cx: set_blink_data::Context, options: BlinkerOptions) {
         rprintln!("Inside set_blink_data task");
         cx.shared
             .blink_data
-            .lock(|blink_data| *blink_data = options)
+            .lock(|blink_data| *blink_data = options);
+        cx.shared.timer0.lock(|t| t.start(0u64.secs()))
     }
 
     #[task(shared = [rgb_state])]
@@ -220,8 +235,20 @@ mod app {
             .lock(|reference_times| reference_times.update(new_time, rtc_ref));
     }
 
-    #[task()]
-    async fn blink(cx: blink::Context) {}
+    #[task(binds = TG0_T0_LEVEL, shared=[timer0, blink_data], priority=1)]
+    fn blink(mut cx: blink::Context) {
+        rprintln!("Inside blink task");
+        cx.shared.timer0.lock(|t| t.clear_interrupt());
+
+        let dur = cx.shared.blink_data.lock(|d| match d {
+            BlinkerOptions::Off => todo!(),
+            BlinkerOptions::On {
+                date_time,
+                freq,
+                duration,
+            } => todo!(),
+        });
+    }
 
     #[task()]
     async fn update_rgb(cx: update_rgb::Context) {}
