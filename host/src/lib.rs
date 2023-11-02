@@ -7,7 +7,7 @@ use std::time::Duration;
 // For more details, see: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file?redirectedfrom=MSDN#win32-device-namespaces
 
 #[cfg(target_os = "linux")]
-static COM_PATH: &str = "/dev/ttyACM1";
+static COM_PATH: &str = "/dev/ttyUSB0";
 #[cfg(target_os = "windows")]
 static COM_PATH: &str = "COM3";
 

@@ -18,10 +18,7 @@ use serial2::SerialPort;
 
 // Application dependencies
 use host::open;
-use shared::{deserialize_crc_cobs, serialize_crc_cobs, Ack, Command}; // local library
-
-const IN_SIZE: usize = max_encoded_len(size_of::<Ack>() + size_of::<u32>());
-const OUT_SIZE: usize = max_encoded_len(size_of::<Command>() + size_of::<u32>());
+use shared::{deserialize_crc_cobs, serialize_crc_cobs, Ack, Command, OUT_SIZE, IN_SIZE}; // local library
 
 type InBuf = [u8; IN_SIZE];
 type OutBuf = [u8; OUT_SIZE];

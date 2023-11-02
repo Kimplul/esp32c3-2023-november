@@ -7,6 +7,12 @@ pub type Id = u32;
 pub type DevId = u32;
 pub type Parameter = u32;
 
+use corncobs::max_encoded_len;
+use core::mem::size_of;
+
+pub const IN_SIZE: usize = max_encoded_len(size_of::<Ack>() + size_of::<u32>());
+pub const OUT_SIZE: usize = max_encoded_len(size_of::<Command>() + size_of::<u32>());
+
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub enum Command {
