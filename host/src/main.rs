@@ -10,7 +10,7 @@
 //!
 
 // Rust dependencies
-use std::{io::Read, process::ChildStdin, time::UNIX_EPOCH};
+use std::{io::Read, time::UNIX_EPOCH};
 
 // Libraries
 use corncobs::ZERO;
@@ -114,8 +114,8 @@ fn get_blink_data() -> BlinkerOptions {
     let time = parse(&date_time.trim()).unwrap();
     return BlinkerOptions::On {
         date_time: shared::DateTime::Utc(time.timestamp() as u64),
-        freq: 1,
-        duration: 1,
+        freq: frequency.trim().parse::<u64>().unwrap(),
+        duration: duration.trim().parse::<u64>().unwrap(),
     };
 }
 
