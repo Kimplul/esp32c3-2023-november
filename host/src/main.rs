@@ -10,10 +10,11 @@
 //!
 
 // Rust dependencies
-use std::{io::Read, time::UNIX_EPOCH};
+use std::{io::Read, process::ChildStdin, time::UNIX_EPOCH};
 
 // Libraries
 use corncobs::ZERO;
+use dateparser::parse;
 use serial2::SerialPort;
 use std::io;
 use std::io::Write;
@@ -21,7 +22,9 @@ use std::time::SystemTime;
 
 // Application dependencies
 use host::open;
-use shared::{deserialize_crc_cobs, serialize_crc_cobs, Ack, Command, IN_SIZE, OUT_SIZE};
+use shared::{
+    deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, IN_SIZE, OUT_SIZE,
+};
 // local library
 
 type InBuf = [u8; IN_SIZE];
@@ -60,11 +63,7 @@ fn main() -> Result<(), std::io::Error> {
         let task = match command {
             1 => Command::RgbOn,
             2 => Command::RgbOff,
-            3 => Command::SetBlinker(shared::BlinkerOptions::On {
-                date_time: shared::DateTime::Now,
-                freq: 2,
-                duration: 100,
-            }),
+            3 => Command::SetBlinker(get_blink_data()),
             4 => Command::SetDateTime(shared::DateTime::Utc(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -84,6 +83,40 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     Ok(())
+}
+
+fn get_blink_data() -> BlinkerOptions {
+    println!("\nInput \n <hh:mm:ss>\n <frequency>\n <duration>\n");
+
+    let mut date_time = String::new();
+    let mut frequency = String::new();
+    let mut duration = String::new();
+
+    println!("Insert date time <hh:mm:ss> or 'off' to set led off\n");
+    print!(" > ");
+    io::stdout().flush().unwrap();
+    io::stdin().read_line(&mut date_time);
+
+    if (date_time.trim().to_lowercase() == "off") {
+        return BlinkerOptions::Off;
+    }
+
+    println!("\nInsert frequency (Hz)\n");
+    print!(" > ");
+    io::stdout().flush().unwrap();
+    io::stdin().read_line(&mut frequency);
+
+    println!("\nInsert duration in seconds\n");
+    print!(" > ");
+    io::stdout().flush().unwrap();
+    io::stdin().read_line(&mut duration);
+
+    let time = parse(&date_time.trim()).unwrap();
+    return BlinkerOptions::On {
+        date_time: shared::DateTime::Utc(time.timestamp() as u64),
+        freq: 1,
+        duration: 1,
+    };
 }
 
 fn request(
