@@ -158,14 +158,14 @@ mod app {
                 *cx.local.cmd_idx += 1;
             });
 
-            if c == 0 {
+            if c == 0 || *cx.local.cmd_idx >= OUT_SIZE {
                 rprint!(" full packet at {}", *cx.local.cmd_idx);
                 broker::spawn().unwrap();
                 *cx.local.cmd_idx = 0;
             }
         }
 
-        rprintln!("");
+        // rprintln!("");
         cx.local.uart_rx.reset_rx_fifo_full_interrupt();
     }
 
@@ -193,7 +193,7 @@ mod app {
                 }
             }
         } else {
-            cmd.unwrap_err();
+            rprintln!("illegal cmd: {:?}", cmd.unwrap_err());
             Ack::NotOk
         };
 

@@ -65,18 +65,43 @@ pub fn serialize_crc_cobs<'a, T: serde::Serialize, const N: usize>(
     &out_buf[0..n]
 }
 
+#[derive(Debug)]
+pub enum DeserializeError {
+    DecodeError,
+    DeserializeError,
+    CrcError
+}
+
 /// deserialize T from cobs in_buf with crc check
 /// panics on all errors
 /// TODO: reasonable error handling
-pub fn deserialize_crc_cobs<T>(in_buf: &mut [u8]) -> Result<T, ()>
+pub fn deserialize_crc_cobs<T>(in_buf: &mut [u8]) -> Result<T, DeserializeError>
 where
     T: for<'de> serde::Deserialize<'de>,
 {
-    let n = corncobs::decode_in_place(in_buf).unwrap();
-    let (t, resp_used) = ssmarshal::deserialize::<T>(&in_buf[0..n]).unwrap();
+    /* looks kind of interesting */
+    let n = corncobs::decode_in_place(in_buf);
+    let n = match n {
+        Ok(n) => n,
+        Err(_) => return Err(DeserializeError::DecodeError)
+    };
+
+    let r = ssmarshal::deserialize::<T>(&in_buf[0..n]);
+    let (t, resp_used) = match r {
+        Ok((t, resp_used)) => (t, resp_used),
+        Err(_) => return Err(DeserializeError::DeserializeError)
+    };
+
     let crc_buf = &in_buf[resp_used..];
-    let (crc, _crc_used) = ssmarshal::deserialize::<u32>(crc_buf).unwrap();
+    let r = ssmarshal::deserialize::<u32>(crc_buf);
+    let (crc, _crc_used) = match r {
+        Ok((crc, _crc_used)) => (crc, _crc_used),
+        Err(_) => return Err(DeserializeError::DeserializeError)
+    };
+
     let pkg_crc = CKSUM.checksum(&in_buf[0..resp_used]);
-    assert_eq! {crc, pkg_crc};
+    if crc != pkg_crc {
+        return Err(DeserializeError::CrcError);
+    }
     Ok(t)
 }
