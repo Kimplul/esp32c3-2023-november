@@ -56,20 +56,20 @@ pub const CKSUM: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
 pub fn serialize_crc_cobs<'a, T: serde::Serialize, const N: usize>(
     t: &T,
     out_buf: &'a mut [u8; N],
-) -> &'a [u8] {
+) -> &'a mut [u8] {
     let n_ser = ssmarshal::serialize(out_buf, t).unwrap();
     let crc = CKSUM.checksum(&out_buf[0..n_ser]);
     let n_crc = ssmarshal::serialize(&mut out_buf[n_ser..], &crc).unwrap();
     let buf_copy = *out_buf; // implies memcpy, could we do better?
     let n = corncobs::encode_buf(&buf_copy[0..n_ser + n_crc], out_buf);
-    &out_buf[0..n]
+    &mut out_buf[0..n]
 }
 
 #[derive(Debug)]
 pub enum DeserializeError {
     DecodeError,
     DeserializeError,
-    CrcError
+    CrcError,
 }
 
 /// deserialize T from cobs in_buf with crc check
@@ -83,23 +83,24 @@ where
     let n = corncobs::decode_in_place(in_buf);
     let n = match n {
         Ok(n) => n,
-        Err(_) => return Err(DeserializeError::DecodeError)
+        Err(_) => return Err(DeserializeError::DecodeError),
     };
 
     let r = ssmarshal::deserialize::<T>(&in_buf[0..n]);
     let (t, resp_used) = match r {
         Ok((t, resp_used)) => (t, resp_used),
-        Err(_) => return Err(DeserializeError::DeserializeError)
+        Err(_) => return Err(DeserializeError::DeserializeError),
     };
 
     let crc_buf = &in_buf[resp_used..];
     let r = ssmarshal::deserialize::<u32>(crc_buf);
     let (crc, _crc_used) = match r {
         Ok((crc, _crc_used)) => (crc, _crc_used),
-        Err(_) => return Err(DeserializeError::DeserializeError)
+        Err(_) => return Err(DeserializeError::DeserializeError),
     };
 
     let pkg_crc = CKSUM.checksum(&in_buf[0..resp_used]);
+
     if crc != pkg_crc {
         return Err(DeserializeError::CrcError);
     }

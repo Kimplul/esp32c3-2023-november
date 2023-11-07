@@ -149,10 +149,10 @@ mod app {
 
     #[task(binds = UART0, local = [cmd_idx, uart_rx], shared = [cmd])]
     fn aggregate(mut cx: aggregate::Context) {
-        // rprint!("received UART0 rx interrupt: ");
+        rprint!("received UART0 rx interrupt: ");
 
         if let nb::Result::Ok(c) = cx.local.uart_rx.read() {
-            // rprint!("{}", c);
+            rprint!("{}", c);
             cx.shared.cmd.lock(|cmd| {
                 cmd[*cx.local.cmd_idx] = c;
                 *cx.local.cmd_idx += 1;
@@ -165,7 +165,7 @@ mod app {
             }
         }
 
-        // rprintln!("");
+        rprintln!("");
         cx.local.uart_rx.reset_rx_fifo_full_interrupt();
     }
 
@@ -198,9 +198,9 @@ mod app {
         };
 
         let mut buf: [u8; IN_SIZE] = [0; IN_SIZE];
-        serialize_crc_cobs(&ack, &mut buf);
+        let b = serialize_crc_cobs(&ack, &mut buf);
         /* todo */
-        let _ = cx.local.uart_tx.write_bytes(&buf);
+        let _ = cx.local.uart_tx.write_bytes(b);
     }
 
     fn handle_new_datetime(time: DateTime) -> Ack {

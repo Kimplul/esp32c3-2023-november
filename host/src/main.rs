@@ -33,17 +33,20 @@ type OutBuf = [u8; OUT_SIZE];
 
 fn main() -> Result<(), std::io::Error> {
     let mut port = open()?;
-    let mut out_buf = [0u8; OUT_SIZE];
-    let mut in_buf = [0u8; IN_SIZE];
 
     loop {
+        let mut bitflip_payload = false;
+        let mut out_buf = [0u8; OUT_SIZE];
+        let mut in_buf = [0u8; IN_SIZE];
+
         println!(
             "\nTASKS:\n \
             1. Toggle RGB on\n \
             2. Toggle RGB off\n \
             3. Set blink data\n \
             4. Set date time\n \
-            5. Quit\n"
+            5. Bit flip on payload\n \
+            6. Quit\n"
         );
         print!(" > ");
         io::stdout().flush().unwrap();
@@ -72,6 +75,10 @@ fn main() -> Result<(), std::io::Error> {
                     .as_secs() as u64,
             )),
             5 => {
+                bitflip_payload = true;
+                Command::RgbOn
+            }
+            6 => {
                 break;
             }
             _ => {
@@ -80,7 +87,7 @@ fn main() -> Result<(), std::io::Error> {
             }
         };
 
-        let response = request(&task, &mut port, &mut out_buf, &mut in_buf)?;
+        let response = request(&task, &mut port, &mut out_buf, &mut in_buf, bitflip_payload)?;
     }
 
     Ok(())
@@ -137,9 +144,16 @@ fn request(
     port: &mut SerialPort,
     out_buf: &mut OutBuf,
     in_buf: &mut InBuf,
+    bitflip_payload: bool,
 ) -> Result<Ack, std::io::Error> {
     println!("out_buf {}", out_buf.len());
     let to_write = serialize_crc_cobs(cmd, out_buf);
+
+    if bitflip_payload {
+        to_write[1] ^= 1 << 0;
+    }
+    println!("{:?}", to_write);
+
     port.write_all(to_write)?;
 
     let mut index: usize = 0;
