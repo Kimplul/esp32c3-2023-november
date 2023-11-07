@@ -23,7 +23,8 @@ use std::time::SystemTime;
 // Application dependencies
 use host::open;
 use shared::{
-    deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, IN_SIZE, OUT_SIZE,
+    deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
+    OUT_SIZE,
 };
 // local library
 
@@ -86,19 +87,28 @@ fn main() -> Result<(), std::io::Error> {
 }
 
 fn get_blink_data() -> BlinkerOptions {
-    println!("\nInput \n <hh:mm:ss>\n <frequency>\n <duration>\n");
+    println!("\nInput \n <hh:mm:ss>, <off>, <now>\n <frequency>\n <duration>\n");
 
-    let mut date_time = String::new();
+    let mut date_time_string = String::new();
     let mut frequency = String::new();
     let mut duration = String::new();
 
     println!("Insert date time <hh:mm:ss> or 'off' to set led off\n");
     print!(" > ");
     io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut date_time);
+    io::stdin().read_line(&mut date_time_string);
 
-    if (date_time.trim().to_lowercase() == "off") {
+    if date_time_string.trim().to_lowercase() == "off" {
         return BlinkerOptions::Off;
+    }
+
+    let date_time;
+
+    if date_time_string.trim().to_lowercase() == "now" {
+        date_time = shared::DateTime::Now;
+    } else {
+        let date_time_ = parse(&date_time_string.trim()).unwrap();
+        date_time = shared::DateTime::Utc(date_time_.timestamp() as u64);
     }
 
     println!("\nInsert frequency (Hz)\n");
@@ -106,16 +116,19 @@ fn get_blink_data() -> BlinkerOptions {
     io::stdout().flush().unwrap();
     io::stdin().read_line(&mut frequency);
 
+    let freq = frequency.trim().parse::<u64>().unwrap();
+
     println!("\nInsert duration in seconds\n");
     print!(" > ");
     io::stdout().flush().unwrap();
     io::stdin().read_line(&mut duration);
 
-    let time = parse(&date_time.trim()).unwrap();
+    let duration = duration.trim().parse::<u64>().unwrap();
+
     return BlinkerOptions::On {
-        date_time: shared::DateTime::Utc(time.timestamp() as u64),
-        freq: frequency.trim().parse::<u64>().unwrap(),
-        duration: duration.trim().parse::<u64>().unwrap(),
+        date_time,
+        freq,
+        duration,
     };
 }
 
