@@ -149,10 +149,10 @@ mod app {
 
     #[task(binds = UART0, local = [cmd_idx, uart_rx], shared = [cmd])]
     fn aggregate(mut cx: aggregate::Context) {
-        rprint!("received UART0 rx interrupt: ");
+        // rprint!("received UART0 rx interrupt: ");
 
         if let nb::Result::Ok(c) = cx.local.uart_rx.read() {
-            rprint!("{}", c);
+            // rprint!("{}", c);
             cx.shared.cmd.lock(|cmd| {
                 cmd[*cx.local.cmd_idx] = c;
                 *cx.local.cmd_idx += 1;
@@ -212,13 +212,33 @@ mod app {
         }
     }
 
-    #[task(shared = [blink_data, timer0])]
+    #[task(shared = [blink_data, timer0, rtc, reference_times])]
     async fn set_blink_data(mut cx: set_blink_data::Context, options: BlinkerOptions) {
         rprintln!("Inside set_blink_data task");
         cx.shared
             .blink_data
             .lock(|blink_data| *blink_data = options);
-        cx.shared.timer0.lock(|t| t.start(0u64.secs()))
+
+        match options {
+            BlinkerOptions::Off => cx.shared.timer0.lock(|t| t.start(0u64.secs())),
+            BlinkerOptions::On {
+                date_time,
+                freq: _,
+                duration: _,
+            } => {
+                match date_time {
+                    DateTime::Now => cx.shared.timer0.lock(|t| t.start(0u64.secs())),
+                    DateTime::Utc(start_time) => {
+                        let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
+                        let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+                        // Todo check that start time is bigger than time now
+                        let delta_time = start_time - time_now;
+                        rprintln!("Time till blinking : {:?}", delta_time);
+                        cx.shared.timer0.lock(|t| t.start(delta_time.secs()));
+                    }
+                }
+            }
+        }
     }
 
     #[task(shared = [rgb_state])]
@@ -234,7 +254,6 @@ mod app {
         rprintln!("set_date_time {:?}", new_time);
 
         let rtc_ref = cx.shared.rtc.lock(|r| r.get_time_ms());
-
         cx.shared
             .reference_times
             .lock(|reference_times| reference_times.update(new_time, rtc_ref));
@@ -245,19 +264,18 @@ mod app {
         rprintln!("Inside blink task");
         cx.shared.timer0.lock(|t| t.clear_interrupt());
 
-        let opts: BlinkerOptions = cx.shared.blink_data.lock(|d| *d);
-
+        let opts = cx.shared.blink_data.lock(|d| *d);
         match opts {
             BlinkerOptions::Off => {
                 cx.local.led.set_low().expect("Failed to turn off the led");
             }
             BlinkerOptions::On {
-                date_time,
+                date_time: _,
                 freq,
-                duration,
+                duration: _,
             } => {
-                let dur = ((1 as f32 / freq as f32) * 1000f32) as u32;
-
+                // TODO not checking for dividing by 0
+                let dur = ((1f32 / freq as f32) * 1000f32) as u32;
                 cx.local.led.toggle().expect("Led toggle failed");
                 cx.shared.timer0.lock(|t| t.start(dur.millis()));
             }

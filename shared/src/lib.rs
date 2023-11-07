@@ -23,6 +23,7 @@ pub enum Command {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[repr(C)]
 pub enum BlinkerOptions {
     Off,
     On {
@@ -33,12 +34,14 @@ pub enum BlinkerOptions {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[repr(C)]
 pub enum DateTime {
     Now,
     Utc(u64),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[repr(C)]
 pub enum Ack {
     Ok,
     Recovered,
