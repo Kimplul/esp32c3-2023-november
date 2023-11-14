@@ -1,6 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 
 use serde_derive::{Deserialize, Serialize};
+pub mod hamming;
 
 // we could use new-type pattern here but let's keep it simple
 pub type Id = u32;
