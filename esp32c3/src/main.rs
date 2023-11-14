@@ -25,7 +25,7 @@ mod app {
 
     use esp_hal_smartled::{smartLedAdapter, SmartLedsAdapter};
 
-    use smart_leds::{brightness, SmartLedsWrite, RGB, RGB8};
+    use smart_leds::{brightness, SmartLedsWrite, RGB};
 
     use shared::{
         deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
@@ -218,7 +218,10 @@ mod app {
         let mut buf: [u8; IN_SIZE] = [0; IN_SIZE];
         let b = serialize_crc_cobs(&ack, &mut buf);
         /* todo */
-        let _ = cx.local.uart_tx.write_bytes(b);
+        cx.local
+            .uart_tx
+            .write_bytes(b)
+            .expect("Failed to write response back to the host");
     }
 
     fn handle_new_datetime(time: DateTime) -> Ack {
@@ -233,30 +236,34 @@ mod app {
     #[task(shared = [blink_data, timer0, rtc, reference_times])]
     async fn set_blink_data(mut cx: set_blink_data::Context, options: BlinkerOptions) {
         rprintln!("Inside set_blink_data task");
-        cx.shared
-            .blink_data
-            .lock(|blink_data| *blink_data = options);
 
-        match options {
-            BlinkerOptions::Off => cx.shared.timer0.lock(|t| t.start(0u64.secs())),
+        cx.shared.blink_data.lock(|blink_data| match options {
+            BlinkerOptions::Off => (),
             BlinkerOptions::On {
                 date_time,
-                freq: _,
-                duration: _,
-            } => {
-                match date_time {
-                    DateTime::Now => cx.shared.timer0.lock(|t| t.start(0u64.secs())),
-                    DateTime::Utc(start_time) => {
-                        let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
-                        let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
-                        // Todo check that start time is bigger than time now
-                        let delta_time = start_time - time_now;
-                        rprintln!("Time till blinking : {:?}", delta_time);
-                        cx.shared.timer0.lock(|t| t.start(delta_time.secs()));
+                freq,
+                duration,
+            } => match date_time {
+                DateTime::Now => {
+                    let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
+                    let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+                    *blink_data = BlinkerOptions::On {
+                        date_time,
+                        freq,
+                        duration: time_now + duration,
+                    };
+                }
+                DateTime::Utc(t) => {
+                    *blink_data = BlinkerOptions::On {
+                        date_time,
+                        freq,
+                        duration: t + duration,
                     }
                 }
-            }
-        }
+            },
+        });
+
+        cx.shared.timer0.lock(|t| t.start(0u64.secs()));
     }
 
     #[task(shared = [rgb_state])]
@@ -278,7 +285,7 @@ mod app {
             .lock(|reference_times| reference_times.update(new_time, rtc_ref));
     }
 
-    #[task(binds = TG0_T0_LEVEL,local=[led], shared=[timer0, blink_data], priority=1)]
+    #[task(binds = TG0_T0_LEVEL,local=[led], shared=[timer0, blink_data, rtc, reference_times], priority=1)]
     fn blink(mut cx: blink::Context) {
         rprintln!("Inside blink task");
         cx.shared.timer0.lock(|t| t.clear_interrupt());
@@ -289,14 +296,40 @@ mod app {
                 cx.local.led.set_low().expect("Failed to turn off the led");
             }
             BlinkerOptions::On {
-                date_time: _,
+                date_time,
                 freq,
-                duration: _,
+                duration,
             } => {
-                // TODO not checking for dividing by 0
-                let dur = ((1f32 / freq as f32) * 1000f32) as u32;
-                cx.local.led.toggle().expect("Led toggle failed");
-                cx.shared.timer0.lock(|t| t.start(dur.millis()));
+                let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
+                let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+
+                if time_now >= duration {
+                    cx.local.led.set_low().expect("Failed to turn off the led");
+                    return;
+                }
+
+                match date_time {
+                    DateTime::Now => {
+                        {
+                            cx.local.led.toggle().expect("Led toggle failed");
+                            // TODO not checking for dividing by 0
+                            let period = ((1f32 / freq as f32) * 1000f32) as u32;
+                            cx.shared.timer0.lock(|t| t.start(period.millis()));
+                        }
+                    }
+                    DateTime::Utc(s_time) => {
+                        if time_now >= s_time {
+                            cx.local.led.toggle().expect("Led toggle failed");
+                            // TODO not checking for dividing by 0
+                            let period = ((1f32 / freq as f32) * 1000f32) as u32;
+                            cx.shared.timer0.lock(|t| t.start(period.millis()));
+                            return;
+                        }
+                        let time_left = s_time - time_now;
+                        // rprintln!("Time until start{}", time_left);
+                        cx.shared.timer0.lock(|t| t.start(time_left.secs()));
+                    }
+                }
             }
         }
     }
@@ -308,22 +341,22 @@ mod app {
         let hours = (time_now / 3600 % 24) + 2;
 
         let color = match hours {
-            x if x >= 3 && x < 9 => RGB {
+            x if (3..9).contains(&x) => RGB {
                 r: 0xF8,
                 g: 0xF3,
                 b: 0x2B,
             },
-            x if x >= 9 && x < 15 => RGB {
+            x if (9..15).contains(&x) => RGB {
                 r: 0x9C,
                 g: 0xFF,
                 b: 0xFA,
             },
-            x if x >= 15 && x < 21 => RGB {
+            x if (15..21).contains(&x) => RGB {
                 r: 0x05,
                 g: 0x3C,
                 b: 0x5E,
             },
-            x if x >= 21 && x < 3 => RGB {
+            x if !(3..21).contains(&x) => RGB {
                 r: 0x31,
                 g: 0x08,
                 b: 0x1F,
