@@ -6,13 +6,14 @@ use panic_rtt_target as _;
 
 #[rtic::app(device = esp32c3, dispatchers = [FROM_CPU_INTR0, FROM_CPU_INTR1])]
 mod app {
+
     use rtt_target::{rprint, rprintln, rtt_init_print};
 
     use esp32c3_hal::{
         self as _,
         clock::ClockControl,
         gpio::{Gpio7, Output, PushPull},
-        peripherals::{Peripherals, TIMG0, UART0},
+        peripherals::{Peripherals, TIMG0, TIMG1, UART0},
         prelude::*,
         rmt::{Channel0, Rmt},
         timer::{Timer, Timer0, TimerGroup},
@@ -75,6 +76,7 @@ mod app {
         reference_times: ReferenceTimes,
         rtc: Rtc<'static>,
         timer0: Timer<Timer0<TIMG0>>,
+        timer1: Timer<Timer0<TIMG1>>,
     }
 
     #[local]
@@ -142,6 +144,15 @@ mod app {
         let mut timer0 = timer_group0.timer0;
         timer0.listen();
 
+        let timer_group1 = TimerGroup::new(
+            peripherals.TIMG1,
+            &clocks,
+            &mut system.peripheral_clock_control,
+        );
+
+        let mut timer1 = timer_group1.timer0;
+        timer1.listen();
+
         let led = io.pins.gpio7.into_push_pull_output();
 
         rprintln!("init works");
@@ -154,6 +165,7 @@ mod app {
                 reference_times: ReferenceTimes::new(),
                 rtc: Rtc::new(peripherals.RTC_CNTL),
                 timer0,
+                timer1,
             },
             Local {
                 uart_rx,
@@ -266,13 +278,13 @@ mod app {
         cx.shared.timer0.lock(|t| t.start(0u64.secs()));
     }
 
-    #[task(shared = [rgb_state])]
+    #[task(shared = [rgb_state, timer1])]
     async fn update_rgb_data(mut cx: update_rgb_data::Context, state: RgbState) {
         rprintln!("Inside update rgb task");
         cx.shared.rgb_state.lock(|rgb_state| {
             *rgb_state = state;
         });
-        update_rgb::spawn().unwrap();
+        cx.shared.timer1.lock(|t| t.start(1u64.secs()));
     }
 
     #[task(shared = [reference_times, rtc])]
@@ -334,39 +346,54 @@ mod app {
         }
     }
 
-    #[task(local=[rgb_led], shared=[rtc, reference_times])]
-    async fn update_rgb(mut cx: update_rgb::Context) {
-        let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
-        let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
-        let hours = (time_now / 3600 % 24) + 2;
+    #[task(binds=TG1_T0_LEVEL, local=[rgb_led], shared=[rtc, reference_times, timer1,rgb_state])]
+    fn update_rgb(mut cx: update_rgb::Context) {
+        cx.shared.timer1.lock(|t| t.clear_interrupt());
 
-        let color = match hours {
-            x if (3..9).contains(&x) => RGB {
-                r: 0xF8,
-                g: 0xF3,
-                b: 0x2B,
-            },
-            x if (9..15).contains(&x) => RGB {
-                r: 0x9C,
-                g: 0xFF,
-                b: 0xFA,
-            },
-            x if (15..21).contains(&x) => RGB {
-                r: 0x05,
-                g: 0x3C,
-                b: 0x5E,
-            },
-            x if !(3..21).contains(&x) => RGB {
-                r: 0x31,
-                g: 0x08,
-                b: 0x1F,
-            },
-            _ => RGB { r: 0, g: 0, b: 0 },
-        };
+        let state = cx.shared.rgb_state.lock(|s| match s {
+            RgbState::On => true,
+            RgbState::Off => false,
+        });
 
-        cx.local
-            .rgb_led
-            .write(brightness([color].into_iter(), 100))
-            .unwrap();
+        if state {
+            let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
+            let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+            let hours = (time_now / 3600 % 24) + 2;
+
+            let color = match hours {
+                x if (3..9).contains(&x) => RGB {
+                    r: 0xF8,
+                    g: 0xF3,
+                    b: 0x2B,
+                },
+                x if (9..15).contains(&x) => RGB {
+                    r: 0x9C,
+                    g: 0xFF,
+                    b: 0xFA,
+                },
+                x if (15..21).contains(&x) => RGB {
+                    r: 0x05,
+                    g: 0x3C,
+                    b: 0x5E,
+                },
+                x if !(3..21).contains(&x) => RGB {
+                    r: 0x31,
+                    g: 0x08,
+                    b: 0x1F,
+                },
+                _ => RGB { r: 0, g: 0, b: 0 },
+            };
+
+            cx.local
+                .rgb_led
+                .write(brightness([color].into_iter(), 100))
+                .unwrap();
+            cx.shared.timer1.lock(|t| t.start(1u64.secs()));
+        } else {
+            cx.local
+                .rgb_led
+                .write(brightness([RGB { r: 0, g: 0, b: 0 }].into_iter(), 0))
+                .unwrap();
+        }
     }
 }
