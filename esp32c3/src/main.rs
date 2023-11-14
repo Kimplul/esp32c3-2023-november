@@ -14,6 +14,7 @@ mod app {
         gpio::{Gpio7, Output, PushPull},
         peripherals::{Peripherals, TIMG0, UART0},
         prelude::*,
+        rmt::{Channel0, Rmt},
         timer::{Timer, Timer0, TimerGroup},
         uart::{
             config::{Config, DataBits, Parity, StopBits},
@@ -21,6 +22,10 @@ mod app {
         },
         Rtc, Uart, IO,
     };
+
+    use esp_hal_smartled::{smartLedAdapter, SmartLedsAdapter};
+
+    use smart_leds::{brightness, SmartLedsWrite, RGB, RGB8};
 
     use shared::{
         deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
@@ -78,6 +83,7 @@ mod app {
         uart_tx: UartTx<'static, UART0>,
         cmd_idx: usize,
         led: Gpio7<Output<PushPull>>,
+        rgb_led: SmartLedsAdapter<Channel0<0>, 0, 25>,
     }
 
     #[init]
@@ -109,6 +115,17 @@ mod app {
             &clocks,
             &mut system.peripheral_clock_control,
         );
+
+        // Configure RMT peripheral globally
+        let rmt = Rmt::new(
+            peripherals.RMT,
+            80u32.MHz(),
+            &mut system.peripheral_clock_control,
+            &clocks,
+        )
+        .unwrap();
+
+        let rgb_led = <smartLedAdapter!(0, 1)>::new(rmt.channel0, io.pins.gpio2);
 
         /* this is apparently dumb */
         uart0.set_rx_fifo_full_threshold(1).unwrap();
@@ -143,6 +160,7 @@ mod app {
                 uart_tx,
                 cmd_idx: 0,
                 led,
+                rgb_led,
             },
         )
     }
@@ -247,6 +265,7 @@ mod app {
         cx.shared.rgb_state.lock(|rgb_state| {
             *rgb_state = state;
         });
+        update_rgb::spawn().unwrap();
     }
 
     #[task(shared = [reference_times, rtc])]
@@ -282,6 +301,39 @@ mod app {
         }
     }
 
-    #[task()]
-    async fn update_rgb(cx: update_rgb::Context) {}
+    #[task(local=[rgb_led], shared=[rtc, reference_times])]
+    async fn update_rgb(mut cx: update_rgb::Context) {
+        let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
+        let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+        let hours = (time_now / 3600 % 24) + 2;
+
+        let color = match hours {
+            x if x >= 3 && x < 9 => RGB {
+                r: 0xF8,
+                g: 0xF3,
+                b: 0x2B,
+            },
+            x if x >= 9 && x < 15 => RGB {
+                r: 0x9C,
+                g: 0xFF,
+                b: 0xFA,
+            },
+            x if x >= 15 && x < 21 => RGB {
+                r: 0x05,
+                g: 0x3C,
+                b: 0x5E,
+            },
+            x if x >= 21 && x < 3 => RGB {
+                r: 0x31,
+                g: 0x08,
+                b: 0x1F,
+            },
+            _ => RGB { r: 0, g: 0, b: 0 },
+        };
+
+        cx.local
+            .rgb_led
+            .write(brightness([color].into_iter(), 100))
+            .unwrap();
+    }
 }

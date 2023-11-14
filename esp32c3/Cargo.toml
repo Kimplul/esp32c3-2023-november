@@ -16,7 +16,9 @@ esp32c3-hal = { git = "https://github.com/perlindgren/esp-hal", branch = 'uart',
     "interrupt-preemption",
     "direct-vectoring",
 ] }
-esp-hal-smartled = {git = "https://github.com/perlindgren/esp-hal", branch = 'uart', features=["esp32c3"]}
+esp-hal-smartled = { git = "https://github.com/perlindgren/esp-hal", branch = 'uart', features = [
+    "esp32c3",
+] }
 esp32c3 = { version = "0.17.0", features = ["critical-section"] }
 
 # tracing and panic handling
