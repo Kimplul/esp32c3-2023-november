@@ -19,14 +19,7 @@ pub fn encode_hamming(v: u8) -> u8 {
     let p4: u8 = d2 ^ d3 ^ d4;
     let p8: u8 = p1 ^ p2 ^ d1 ^ p4 ^ d2 ^ d3 ^ d4;
 
-    return (p1 << 0)
-        | (p2 << 1)
-        | (d1 << 2)
-        | (p4 << 3)
-        | (d2 << 4)
-        | (d3 << 5)
-        | (d4 << 6)
-        | (p8 << 7);
+    p1 | (p2 << 1) | (d1 << 2) | (p4 << 3) | (d2 << 4) | (d3 << 5) | (d4 << 6) | (p8 << 7)
 }
 
 pub fn decode_hamming(mut h: u8) -> Option<u8> {
@@ -70,7 +63,7 @@ pub fn decode_hamming(mut h: u8) -> Option<u8> {
     let d3: u8 = nth_bit(h, 5);
     let d4: u8 = nth_bit(h, 6);
 
-    return Some((d1 << 0) | (d2 << 1) | (d3 << 2) | (d4 << 3));
+    Some(d1 | (d2 << 1) | (d3 << 2) | (d4 << 3))
 }
 
 #[test]
