@@ -293,7 +293,7 @@ mod app {
         cx.shared.timer1.lock(|t| t.start(0u64.secs()));
     }
 
-    #[task(shared = [reference_times, rtc, timer1])]
+    #[task(shared = [reference_times, rtc, timer0, timer1])]
     async fn set_date_time(mut cx: set_date_time::Context, new_time: u64) {
         rprintln!("set_date_time {:?}", new_time);
         rprintln!("hours {}", new_time / 3600 % 24);
@@ -303,7 +303,9 @@ mod app {
             .reference_times
             .lock(|reference_times| reference_times.update(new_time, rtc_ref));
 
+        /* trigger our LED handlers */
         cx.shared.timer1.lock(|t| t.start(0u64.secs()));
+        cx.shared.timer0.lock(|t| t.start(0u64.secs()));
     }
 
     #[task(binds = TG0_T0_LEVEL,local=[led], shared=[timer0, blink_data, rtc, reference_times], priority=1)]
@@ -327,10 +329,6 @@ mod app {
                 match date_time {
                     DateTime::Now => panic!("Should never end here"), // Should never be this variant
                     DateTime::Utc(s_time) => {
-                        if time_now <= s_time {
-                            cx.local.led.set_low().expect("Failed to turn off the led");
-                            return;
-                        }
                         if time_now >= s_time + duration {
                             cx.local.led.set_low().expect("Failed to turn off the led");
                             return;
@@ -342,7 +340,9 @@ mod app {
                             cx.shared.timer0.lock(|t| t.start(period.millis()));
                             return;
                         }
+                        /* wait for our time to start with LED off */
                         let time_left = s_time - time_now;
+                        cx.local.led.set_low().expect("Failed to turn off the led");
                         cx.shared.timer0.lock(|t| t.start(time_left.secs()));
                         // rprintln!("Curr time : {}\nStart_time{}", time_now, s_time);
                         // cx.shared.timer0.lock(|t| t.start(1u64.secs()));
