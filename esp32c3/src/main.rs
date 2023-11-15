@@ -199,25 +199,22 @@ mod app {
         cx.local.uart_rx.reset_rx_fifo_full_interrupt();
     }
 
-    #[task(shared = [cmd], local = [uart_tx])]
+    #[task(shared = [cmd, reference_times], local = [uart_tx])]
     async fn broker(mut cx: broker::Context) {
         let cmd = cx
             .shared
             .cmd
             .lock(|cmd| deserialize_crc_cobs::<Command>(cmd));
 
+        /* assume utc_reference of 0 means unset */
+        let datetime_set = cx.shared.reference_times.lock(|r| r.utc_reference != 0);
+
         let ack = if let Ok(cmd) = cmd {
             match cmd {
                 Command::SetDateTime(t) => handle_new_datetime(t),
-                Command::SetBlinker(options) => handle_new_blink_data(options),
-                Command::RgbOn => {
-                    update_rgb_data::spawn(RgbState::On).unwrap();
-                    Ack::Ok
-                }
-                Command::RgbOff => {
-                    update_rgb_data::spawn(RgbState::Off).unwrap();
-                    Ack::Ok
-                }
+                Command::SetBlinker(options) => handle_new_blink_data(options, datetime_set),
+                Command::RgbOn => handle_new_rgb_data(RgbState::On, datetime_set),
+                Command::RgbOff => handle_new_rgb_data(RgbState::Off, datetime_set),
             }
         } else {
             rprintln!("illegal cmd: {:?}", cmd.unwrap_err());
@@ -233,15 +230,21 @@ mod app {
             .expect("Failed to write response back to the host");
     }
 
-    fn handle_new_datetime(time: DateTime) -> Ack {
-        if let DateTime::Utc(t) = time {
-            set_date_time::spawn(t).unwrap();
-            Ack::Ok
-        } else {
-            Ack::NotOk
+    fn handle_new_rgb_data(state: RgbState, datetime_set: bool) -> Ack {
+        /* datetime checking is kind of dispersed here, not ideal */
+        if !datetime_set {
+            return Ack::NotOk;
         }
+
+        update_rgb_data::spawn(state).unwrap();
+        Ack::Ok
     }
-    fn handle_new_blink_data(options: BlinkerOptions) -> Ack {
+
+    fn handle_new_blink_data(options: BlinkerOptions, datetime_set: bool) -> Ack {
+        if !datetime_set {
+            return Ack::NotOk;
+        }
+
         if let BlinkerOptions::On {
             date_time: _,
             freq,
@@ -256,6 +259,16 @@ mod app {
         set_blink_data::spawn(options).unwrap();
         Ack::Ok
     }
+
+    fn handle_new_datetime(time: DateTime) -> Ack {
+        if let DateTime::Utc(t) = time {
+            set_date_time::spawn(t).unwrap();
+            Ack::Ok
+        } else {
+            Ack::NotOk
+        }
+    }
+
     #[task(shared = [blink_data, timer0, rtc, reference_times])]
     async fn set_blink_data(mut cx: set_blink_data::Context, options: BlinkerOptions) {
         rprintln!("Inside set_blink_data task");
