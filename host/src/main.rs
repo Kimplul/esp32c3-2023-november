@@ -108,8 +108,9 @@ fn get_blink_data() -> BlinkerOptions {
     if date_time_string.trim().to_lowercase() == "now" {
         date_time = shared::DateTime::Now;
     } else {
-        let date_time_ = parse(&date_time_string.trim()).unwrap();
-        date_time = shared::DateTime::Utc(date_time_.timestamp() as u64);
+        // Using UTC timezone to pretend that our local timezone is UTC0.
+        let date_time_ = parse_with_timezone(date_time_string.trim(), &chrono::Utc).unwrap();
+        date_time = shared::DateTime::Utc(date_time_.naive_local().timestamp() as u64);
     }
 
     println!("\nInsert frequency (Hz)\n");
