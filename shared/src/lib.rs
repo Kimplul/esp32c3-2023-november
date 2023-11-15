@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), no_std)]
-
+#![feature(iter_array_chunks)]
+use hamming::{decode_hamming, encode_hamming};
 use serde_derive::{Deserialize, Serialize};
 pub mod hamming;
 
@@ -11,8 +12,8 @@ pub type Parameter = u32;
 use core::mem::size_of;
 use corncobs::max_encoded_len;
 
-pub const IN_SIZE: usize = max_encoded_len(size_of::<Ack>() + size_of::<u32>());
-pub const OUT_SIZE: usize = max_encoded_len(size_of::<Command>() + size_of::<u32>());
+pub const IN_SIZE: usize = max_encoded_len(size_of::<Ack>() + size_of::<u32>()) * 2;
+pub const OUT_SIZE: usize = max_encoded_len(size_of::<Command>() + size_of::<u32>()) * 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(C)]
@@ -63,7 +64,22 @@ pub fn serialize_crc_cobs<'a, T: serde::Serialize, const N: usize>(
     let n_crc = ssmarshal::serialize(&mut out_buf[n_ser..], &crc).unwrap();
     let buf_copy = *out_buf; // implies memcpy, could we do better?
     let n = corncobs::encode_buf(&buf_copy[0..n_ser + n_crc], out_buf);
-    &mut out_buf[0..n]
+    let temp = out_buf.clone();
+
+    let mut idx = 0;
+
+    for b in &temp[0..n] {
+        let first_half = b & 0xF;
+        let second_half = b >> 4 & 0xF;
+        let firsthalf_encoder = encode_hamming(first_half);
+        let secondhalf_encoder = encode_hamming(second_half);
+        out_buf[idx] = firsthalf_encoder;
+
+        idx += 1;
+        out_buf[idx] = secondhalf_encoder;
+        idx += 1;
+    }
+    &mut out_buf[0..idx - 1]
 }
 
 #[derive(Debug)]
@@ -71,8 +87,8 @@ pub enum DeserializeError {
     DecodeError,
     DeserializeError,
     CrcError,
+    HammingError,
 }
-
 /// deserialize T from cobs in_buf with crc check
 /// panics on all errors
 /// TODO: reasonable error handling
@@ -80,27 +96,48 @@ pub fn deserialize_crc_cobs<T>(in_buf: &mut [u8]) -> Result<T, DeserializeError>
 where
     T: for<'de> serde::Deserialize<'de>,
 {
+    let mut hammingdecoder_buf = [0u8; OUT_SIZE];
+    let mut idx=0;
+    for  [b1, b2] in in_buf.into_iter().array_chunks::<2>() {
+        let decoded_b1 = decode_hamming(*b1);
+        let decoded_b1 = if decoded_b1.is_some() {
+            decoded_b1.unwrap()
+        } else {
+            return Err(DeserializeError::HammingError);
+        };
+
+        let decoded_b2 = decode_hamming(*b2);
+        let mut decoded_b2 = if decoded_b2.is_some() {
+            decoded_b2.unwrap()
+        } else {
+            return Err(DeserializeError::HammingError);
+        };
+        decoded_b2 = decoded_b2 << 4;
+        let byte= decoded_b1| decoded_b2;
+        hammingdecoder_buf[idx]= byte;
+        idx+=1;
+    }
     /* looks kind of interesting */
-    let n = corncobs::decode_in_place(in_buf);
+    let n = corncobs::decode_in_place(&mut hammingdecoder_buf[0..idx]);
     let n = match n {
         Ok(n) => n,
         Err(_) => return Err(DeserializeError::DecodeError),
     };
 
-    let r = ssmarshal::deserialize::<T>(&in_buf[0..n]);
+    let r = ssmarshal::deserialize::<T>(& hammingdecoder_buf[0..n]);
     let (t, resp_used) = match r {
         Ok((t, resp_used)) => (t, resp_used),
         Err(_) => return Err(DeserializeError::DeserializeError),
     };
 
-    let crc_buf = &in_buf[resp_used..];
+    let crc_buf = &hammingdecoder_buf[resp_used..];
     let r = ssmarshal::deserialize::<u32>(crc_buf);
     let (crc, _crc_used) = match r {
         Ok((crc, _crc_used)) => (crc, _crc_used),
         Err(_) => return Err(DeserializeError::DeserializeError),
     };
 
-    let pkg_crc = CKSUM.checksum(&in_buf[0..resp_used]);
+    let pkg_crc = CKSUM.checksum(& hammingdecoder_buf[0..resp_used]);
 
     if crc != pkg_crc {
         return Err(DeserializeError::CrcError);
