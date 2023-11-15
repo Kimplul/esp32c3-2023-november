@@ -289,17 +289,21 @@ mod app {
         cx.shared.rgb_state.lock(|rgb_state| {
             *rgb_state = state;
         });
-        cx.shared.timer1.lock(|t| t.start(1u64.secs()));
+
+        cx.shared.timer1.lock(|t| t.start(0u64.secs()));
     }
 
-    #[task(shared = [reference_times, rtc])]
+    #[task(shared = [reference_times, rtc, timer1])]
     async fn set_date_time(mut cx: set_date_time::Context, new_time: u64) {
         rprintln!("set_date_time {:?}", new_time);
+        rprintln!("hours {}", new_time / 3600 % 24);
 
         let rtc_ref = cx.shared.rtc.lock(|r| r.get_time_ms());
         cx.shared
             .reference_times
             .lock(|reference_times| reference_times.update(new_time, rtc_ref));
+
+        cx.shared.timer1.lock(|t| t.start(0u64.secs()));
     }
 
     #[task(binds = TG0_T0_LEVEL,local=[led], shared=[timer0, blink_data, rtc, reference_times], priority=1)]
@@ -356,7 +360,7 @@ mod app {
         if state {
             let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
             let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
-            let hours = (time_now / 3600 % 24) + 2;
+            let hours = time_now / 3600 % 24;
 
             let color = match hours {
                 x if (3..9).contains(&x) => RGB {
@@ -384,7 +388,7 @@ mod app {
 
             cx.local
                 .rgb_led
-                .write(brightness([color].into_iter(), 100))
+                .write(brightness([color].into_iter(), 20))
                 .unwrap();
             cx.shared.timer1.lock(|t| t.start(1u64.secs()));
         } else {

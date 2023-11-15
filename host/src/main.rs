@@ -10,15 +10,14 @@
 //!
 
 // Rust dependencies
-use std::{io::Read, time::UNIX_EPOCH};
+use std::io::Read;
 
 // Libraries
 use corncobs::ZERO;
-use dateparser::parse;
+use dateparser::{parse, parse_with_timezone};
 use serial2::SerialPort;
 use std::io;
 use std::io::Write;
-use std::time::SystemTime;
 
 // Application dependencies
 use host::open;
@@ -68,12 +67,7 @@ fn main() -> Result<(), std::io::Error> {
             1 => Command::RgbOn,
             2 => Command::RgbOff,
             3 => Command::SetBlinker(get_blink_data()),
-            4 => Command::SetDateTime(shared::DateTime::Utc(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as u64,
-            )),
+            4 => Command::SetDateTime(set_datetime()),
             5 => {
                 bitflip_payload = true;
                 Command::RgbOn
@@ -103,7 +97,7 @@ fn get_blink_data() -> BlinkerOptions {
     println!("Insert date time <hh:mm:ss> or 'off' to set led off\n");
     print!(" > ");
     io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut date_time_string);
+    let _ = io::stdin().read_line(&mut date_time_string);
 
     if date_time_string.trim().to_lowercase() == "off" {
         return BlinkerOptions::Off;
@@ -121,22 +115,40 @@ fn get_blink_data() -> BlinkerOptions {
     println!("\nInsert frequency (Hz)\n");
     print!(" > ");
     io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut frequency);
+    let _ = io::stdin().read_line(&mut frequency);
 
     let freq = frequency.trim().parse::<u64>().unwrap();
 
     println!("\nInsert duration in seconds\n");
     print!(" > ");
     io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut duration);
+    let _ = io::stdin().read_line(&mut duration);
 
     let duration = duration.trim().parse::<u64>().unwrap();
 
-    return BlinkerOptions::On {
+    BlinkerOptions::On {
         date_time,
         freq,
         duration,
-    };
+    }
+}
+
+fn set_datetime() -> DateTime {
+    let mut date_time_string = String::new();
+
+    println!("Insert date time <hh:mm:ss> or 'now' to set current time\n");
+    print!(" > ");
+    io::stdout().flush().unwrap();
+    let _ = io::stdin().read_line(&mut date_time_string);
+
+    // Use naive_local time to ignore timezone and pretend that our local timzone is UTC0.
+    if date_time_string.trim().to_lowercase() == "now" {
+        let utc_timestamp = chrono::Local::now().naive_local().timestamp();
+        return shared::DateTime::Utc(utc_timestamp as u64);
+    }
+    // Using UTC timezone to pretend that our local timezone is UTC0.
+    let date_time_ = parse_with_timezone(date_time_string.trim(), &chrono::Utc).unwrap();
+    shared::DateTime::Utc(date_time_.naive_local().timestamp() as u64)
 }
 
 fn request(
