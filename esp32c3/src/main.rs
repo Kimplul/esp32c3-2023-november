@@ -209,10 +209,7 @@ mod app {
         let ack = if let Ok(cmd) = cmd {
             match cmd {
                 Command::SetDateTime(t) => handle_new_datetime(t),
-                Command::SetBlinker(options) => {
-                    set_blink_data::spawn(options).unwrap();
-                    Ack::Ok
-                }
+                Command::SetBlinker(options) => handle_new_blink_data(options),
                 Command::RgbOn => {
                     update_rgb_data::spawn(RgbState::On).unwrap();
                     Ack::Ok
@@ -244,7 +241,21 @@ mod app {
             Ack::NotOk
         }
     }
+    fn handle_new_blink_data(options: BlinkerOptions) -> Ack {
+        if let BlinkerOptions::On {
+            date_time: _,
+            freq,
+            duration: _,
+        } = options
+        {
+            if freq == 0 {
+                return Ack::NotOk;
+            }
+        }
 
+        set_blink_data::spawn(options).unwrap();
+        Ack::Ok
+    }
     #[task(shared = [blink_data, timer0, rtc, reference_times])]
     async fn set_blink_data(mut cx: set_blink_data::Context, options: BlinkerOptions) {
         rprintln!("Inside set_blink_data task");
@@ -260,18 +271,12 @@ mod app {
                     let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
                     let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
                     *blink_data = BlinkerOptions::On {
-                        date_time,
+                        date_time: DateTime::Utc(time_now),
                         freq,
-                        duration: time_now + duration,
+                        duration,
                     };
                 }
-                DateTime::Utc(t) => {
-                    *blink_data = BlinkerOptions::On {
-                        date_time,
-                        freq,
-                        duration: t + duration,
-                    }
-                }
+                DateTime::Utc(_) => *blink_data = options,
             },
         });
 
@@ -315,31 +320,24 @@ mod app {
                 let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
                 let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
 
-                if time_now >= duration {
-                    cx.local.led.set_low().expect("Failed to turn off the led");
-                    return;
-                }
-
                 match date_time {
-                    DateTime::Now => {
-                        {
-                            cx.local.led.toggle().expect("Led toggle failed");
-                            // TODO not checking for dividing by 0
-                            let period = ((1f32 / freq as f32) * 1000f32) as u32;
-                            cx.shared.timer0.lock(|t| t.start(period.millis()));
-                        }
-                    }
+                    DateTime::Now => panic!("Should never end here"), // Should never be this variant
                     DateTime::Utc(s_time) => {
+                        if time_now >= s_time + duration {
+                            cx.local.led.set_low().expect("Failed to turn off the led");
+                            return;
+                        }
                         if time_now >= s_time {
                             cx.local.led.toggle().expect("Led toggle failed");
-                            // TODO not checking for dividing by 0
+                            // TODO not checking for dividing by 0 but should not happen
                             let period = ((1f32 / freq as f32) * 1000f32) as u32;
                             cx.shared.timer0.lock(|t| t.start(period.millis()));
                             return;
                         }
                         let time_left = s_time - time_now;
-                        // rprintln!("Time until start{}", time_left);
                         cx.shared.timer0.lock(|t| t.start(time_left.secs()));
+                        // rprintln!("Curr time : {}\nStart_time{}", time_now, s_time);
+                        // cx.shared.timer0.lock(|t| t.start(1u64.secs()));
                     }
                 }
             }
