@@ -23,7 +23,7 @@ use std::io::Write;
 use host::open;
 use shared::{
     deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
-    OUT_SIZE,
+    OUT_SIZE, hamming::decode_hamming
 };
 // local library
 
@@ -175,7 +175,16 @@ fn request(
         if index < IN_SIZE {
             index += 1;
         }
-        port.read_exact(slice)?;
+
+        let mut b = [0u8; 2];
+        port.read(&mut b[0..1])?;
+        port.read(&mut b[1..2])?;
+
+        let (b0, _) = decode_hamming(b[0]).unwrap();
+        let (b1, _) = decode_hamming(b[1]).unwrap();
+
+        slice[0] = b0 | b1 << 4;
+
         if slice[0] == ZERO {
             println!("-- cobs package received --");
             break;

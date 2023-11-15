@@ -79,7 +79,8 @@ pub fn serialize_crc_cobs<'a, T: serde::Serialize, const N: usize>(
         out_buf[idx] = secondhalf_encoder;
         idx += 1;
     }
-    &mut out_buf[0..idx - 1]
+
+    &mut out_buf[0..idx]
 }
 
 #[derive(Debug)]
@@ -96,48 +97,27 @@ pub fn deserialize_crc_cobs<T>(in_buf: &mut [u8]) -> Result<T, DeserializeError>
 where
     T: for<'de> serde::Deserialize<'de>,
 {
-    let mut hammingdecoder_buf = [0u8; OUT_SIZE];
-    let mut idx=0;
-    for  [b1, b2] in in_buf.into_iter().array_chunks::<2>() {
-        let decoded_b1 = decode_hamming(*b1);
-        let decoded_b1 = if decoded_b1.is_some() {
-            decoded_b1.unwrap()
-        } else {
-            return Err(DeserializeError::HammingError);
-        };
-
-        let decoded_b2 = decode_hamming(*b2);
-        let mut decoded_b2 = if decoded_b2.is_some() {
-            decoded_b2.unwrap()
-        } else {
-            return Err(DeserializeError::HammingError);
-        };
-        decoded_b2 = decoded_b2 << 4;
-        let byte= decoded_b1| decoded_b2;
-        hammingdecoder_buf[idx]= byte;
-        idx+=1;
-    }
     /* looks kind of interesting */
-    let n = corncobs::decode_in_place(&mut hammingdecoder_buf[0..idx]);
+    let n = corncobs::decode_in_place(in_buf);
     let n = match n {
         Ok(n) => n,
         Err(_) => return Err(DeserializeError::DecodeError),
     };
 
-    let r = ssmarshal::deserialize::<T>(& hammingdecoder_buf[0..n]);
+    let r = ssmarshal::deserialize::<T>(&in_buf[0..n]);
     let (t, resp_used) = match r {
         Ok((t, resp_used)) => (t, resp_used),
         Err(_) => return Err(DeserializeError::DeserializeError),
     };
 
-    let crc_buf = &hammingdecoder_buf[resp_used..];
+    let crc_buf = &in_buf[resp_used..];
     let r = ssmarshal::deserialize::<u32>(crc_buf);
     let (crc, _crc_used) = match r {
         Ok((crc, _crc_used)) => (crc, _crc_used),
         Err(_) => return Err(DeserializeError::DeserializeError),
     };
 
-    let pkg_crc = CKSUM.checksum(& hammingdecoder_buf[0..resp_used]);
+    let pkg_crc = CKSUM.checksum(&in_buf[0..resp_used]);
 
     if crc != pkg_crc {
         return Err(DeserializeError::CrcError);

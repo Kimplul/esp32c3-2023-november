@@ -30,7 +30,7 @@ mod app {
 
     use shared::{
         deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
-        OUT_SIZE,
+        OUT_SIZE, hamming::decode_hamming
     };
 
     #[derive(Debug)]
@@ -130,7 +130,7 @@ mod app {
         let rgb_led = <smartLedAdapter!(0, 1)>::new(rmt.channel0, io.pins.gpio2);
 
         /* this is apparently dumb */
-        uart0.set_rx_fifo_full_threshold(1).unwrap();
+        uart0.set_rx_fifo_full_threshold(2).unwrap();
         uart0.listen_rx_fifo_full();
 
         let (uart_tx, uart_rx) = uart0.split();
@@ -181,18 +181,26 @@ mod app {
     fn aggregate(mut cx: aggregate::Context) {
         rprint!("received UART0 rx interrupt: ");
 
-        if let nb::Result::Ok(c) = cx.local.uart_rx.read() {
-            rprint!("{}", c);
-            cx.shared.cmd.lock(|cmd| {
-                cmd[*cx.local.cmd_idx] = c;
-                *cx.local.cmd_idx += 1;
-            });
+        /* read two bytes */
+        let b0 = cx.local.uart_rx.read().unwrap();
+        let b1 = cx.local.uart_rx.read().unwrap();
+        rprint!("b0 => {} b1 => {} ", b0, b1);
 
-            if c == 0 || *cx.local.cmd_idx >= OUT_SIZE {
-                rprint!(" full packet at {}", *cx.local.cmd_idx);
-                broker::spawn().unwrap();
-                *cx.local.cmd_idx = 0;
-            }
+        let (b0, f0) = decode_hamming(b0).unwrap();
+        let (b1, f1) = decode_hamming(b1).unwrap();
+
+        let c = b0 | b1 << 4;
+
+        rprint!("c => {}", c);
+        cx.shared.cmd.lock(|cmd| {
+            cmd[*cx.local.cmd_idx] = c;
+            *cx.local.cmd_idx += 1;
+        });
+
+        if c == 0 || *cx.local.cmd_idx >= OUT_SIZE {
+            rprint!(" full packet at {}", *cx.local.cmd_idx);
+            broker::spawn().unwrap();
+            *cx.local.cmd_idx = 0;
         }
 
         rprintln!("");
