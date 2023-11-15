@@ -327,6 +327,10 @@ mod app {
                 match date_time {
                     DateTime::Now => panic!("Should never end here"), // Should never be this variant
                     DateTime::Utc(s_time) => {
+                        if time_now <= s_time {
+                            cx.local.led.set_low().expect("Failed to turn off the led");
+                            return;
+                        }
                         if time_now >= s_time + duration {
                             cx.local.led.set_low().expect("Failed to turn off the led");
                             return;
