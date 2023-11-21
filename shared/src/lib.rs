@@ -42,7 +42,7 @@ pub enum DateTime {
     Utc(u64),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[repr(C)]
 pub enum Ack {
     Ok,
@@ -64,7 +64,7 @@ pub fn serialize_crc_cobs<'a, T: serde::Serialize, const N: usize>(
     let n_crc = ssmarshal::serialize(&mut out_buf[n_ser..], &crc).unwrap();
     let buf_copy = *out_buf; // implies memcpy, could we do better?
     let n = corncobs::encode_buf(&buf_copy[0..n_ser + n_crc], out_buf);
-    let temp = out_buf.clone();
+    let temp = *out_buf;
 
     let mut idx = 0;
 

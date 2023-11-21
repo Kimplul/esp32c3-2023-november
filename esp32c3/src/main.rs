@@ -29,8 +29,8 @@ mod app {
     use smart_leds::{brightness, SmartLedsWrite, RGB};
 
     use shared::{
-        deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
-        OUT_SIZE, hamming::decode_hamming
+        deserialize_crc_cobs, hamming::decode_hamming, serialize_crc_cobs, Ack, BlinkerOptions,
+        Command, DateTime, IN_SIZE, OUT_SIZE,
     };
 
     #[derive(Debug)]
@@ -86,6 +86,7 @@ mod app {
         cmd_idx: usize,
         led: Gpio7<Output<PushPull>>,
         rgb_led: SmartLedsAdapter<Channel0<0>, 0, 25>,
+        hamming_corrected: bool,
     }
 
     #[init]
@@ -173,51 +174,87 @@ mod app {
                 cmd_idx: 0,
                 led,
                 rgb_led,
+                hamming_corrected: false,
             },
         )
     }
 
-    #[task(binds = UART0, local = [cmd_idx, uart_rx], shared = [cmd])]
+    #[task(binds = UART0, local = [cmd_idx, uart_rx, hamming_corrected], shared = [cmd])]
     fn aggregate(mut cx: aggregate::Context) {
-        rprint!("received UART0 rx interrupt: ");
+        // rprint!("received UART0 rx interrupt: ");
 
         /* read two bytes */
         let b0 = cx.local.uart_rx.read().unwrap();
         let b1 = cx.local.uart_rx.read().unwrap();
-        rprint!("b0 => {} b1 => {} ", b0, b1);
+        // rprint!("b0 => {} b1 => {} ", b0, b1);
 
-        let (b0, f0) = decode_hamming(b0).unwrap();
-        let (b1, f1) = decode_hamming(b1).unwrap();
+        let mut hamming_err = false;
 
-        let c = b0 | b1 << 4;
+        let b0_decoded;
+        let mut b0_corrected = false;
 
-        rprint!("c => {}", c);
+        match decode_hamming(b0) {
+            Some(h) => {
+                b0_decoded = h.0;
+                b0_corrected = h.1
+            }
+            None => {
+                b0_decoded = 0;
+                hamming_err = true;
+            }
+        }
+
+        let b1_decoded;
+        let mut b1_corrected = false;
+
+        match decode_hamming(b1) {
+            Some(h) => {
+                b1_decoded = h.0;
+                b1_corrected = h.1
+            }
+            None => {
+                b1_decoded = 0;
+                hamming_err = true;
+            }
+        }
+
+        // let (b0, b0_corrected) = decode_hamming(b0).unwrap();
+        // let (b1, b1_corrected) = decode_hamming(b1).unwrap();
+
+        if b0_corrected || b1_corrected {
+            *cx.local.hamming_corrected = true;
+        }
+
+        let c = b0_decoded | b1_decoded << 4;
+
+        // rprint!("c => {}", c);
         cx.shared.cmd.lock(|cmd| {
             cmd[*cx.local.cmd_idx] = c;
             *cx.local.cmd_idx += 1;
         });
 
-        if c == 0 || *cx.local.cmd_idx >= OUT_SIZE {
-            rprint!(" full packet at {}", *cx.local.cmd_idx);
-            broker::spawn().unwrap();
+        if c == 0 || *cx.local.cmd_idx >= OUT_SIZE || hamming_err {
+            // assert!(hamming_err);
+            // rprint!(" full packet at {}", *cx.local.cmd_idx);
+            broker::spawn(*cx.local.hamming_corrected).unwrap();
             *cx.local.cmd_idx = 0;
+            *cx.local.hamming_corrected = false;
         }
 
-        rprintln!("");
+        // rprintln!("");
         cx.local.uart_rx.reset_rx_fifo_full_interrupt();
     }
 
     #[task(shared = [cmd, reference_times], local = [uart_tx])]
-    async fn broker(mut cx: broker::Context) {
+    async fn broker(mut cx: broker::Context, hamming_corrected: bool) {
         let cmd = cx
             .shared
             .cmd
             .lock(|cmd| deserialize_crc_cobs::<Command>(cmd));
-
         /* assume utc_reference of 0 means unset */
         let datetime_set = cx.shared.reference_times.lock(|r| r.utc_reference != 0);
 
-        let ack = if let Ok(cmd) = cmd {
+        let mut ack = if let Ok(cmd) = cmd {
             match cmd {
                 Command::SetDateTime(t) => handle_new_datetime(t),
                 Command::SetBlinker(options) => handle_new_blink_data(options, datetime_set),
@@ -229,12 +266,17 @@ mod app {
             Ack::NotOk
         };
 
+        if hamming_corrected && ack == Ack::Ok {
+            ack = Ack::Recovered;
+        }
+
         let mut buf: [u8; IN_SIZE] = [0; IN_SIZE];
-        let b = serialize_crc_cobs(&ack, &mut buf);
-        /* todo */
+        let response = serialize_crc_cobs(&ack, &mut buf);
+        rprintln!("Responding with : {:?}", ack);
+        rprintln!("Responding with : {:?}", response);
         cx.local
             .uart_tx
-            .write_bytes(b)
+            .write_bytes(response)
             .expect("Failed to write response back to the host");
     }
 

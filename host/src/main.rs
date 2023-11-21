@@ -22,8 +22,8 @@ use std::io::Write;
 // Application dependencies
 use host::open;
 use shared::{
-    deserialize_crc_cobs, serialize_crc_cobs, Ack, BlinkerOptions, Command, DateTime, IN_SIZE,
-    OUT_SIZE, hamming::decode_hamming
+    deserialize_crc_cobs, hamming::decode_hamming, serialize_crc_cobs, Ack, BlinkerOptions,
+    Command, DateTime, IN_SIZE, OUT_SIZE,
 };
 // local library
 
@@ -103,15 +103,15 @@ fn get_blink_data() -> BlinkerOptions {
         return BlinkerOptions::Off;
     }
 
-    let date_time;
+    // let date_time;
 
-    if date_time_string.trim().to_lowercase() == "now" {
-        date_time = shared::DateTime::Now;
+    let date_time = if date_time_string.trim().to_lowercase() == "now" {
+        shared::DateTime::Now
     } else {
         // Using UTC timezone to pretend that our local timezone is UTC0.
         let date_time_ = parse_with_timezone(date_time_string.trim(), &chrono::Utc).unwrap();
-        date_time = shared::DateTime::Utc(date_time_.naive_local().timestamp() as u64);
-    }
+        shared::DateTime::Utc(date_time_.naive_local().timestamp() as u64)
+    };
 
     println!("\nInsert frequency (Hz)\n");
     print!(" > ");
@@ -161,35 +161,51 @@ fn request(
 ) -> Result<Ack, std::io::Error> {
     println!("out_buf {}", out_buf.len());
     let to_write = serialize_crc_cobs(cmd, out_buf);
-
+    println!("Actual : {:?}", to_write);
     if bitflip_payload {
-        to_write[1] ^= 1 << 0;
+        // to_write[2] ^= 1 << 1;
+        to_write[4] = 2;
+        println!("Corrup : {:?}", to_write);
     }
-    println!("{:?}", to_write);
-
-    port.write_all(to_write)?;
-
-    let mut index: usize = 0;
+    // println!("{:?}", to_write);
+    let mut tries = 0;
     loop {
-        let slice = &mut in_buf[index..index + 1];
-        if index < IN_SIZE {
-            index += 1;
+        port.write_all(to_write)?;
+
+        let mut index: usize = 0;
+        loop {
+            let slice = &mut in_buf[index..index + 1];
+            if index < IN_SIZE {
+                index += 1;
+            }
+
+            let mut b = [0u8; 2];
+            port.read_exact(&mut b[0..1])?;
+            // println!("Host received : {}", b[0]);
+            port.read_exact(&mut b[1..2])?;
+            // println!("Host received : {}", b[1]);
+
+            let (b0, _) = decode_hamming(b[0]).unwrap();
+            let (b1, _) = decode_hamming(b[1]).unwrap();
+
+            slice[0] = b0 | b1 << 4;
+            if slice[0] == ZERO {
+                println!("-- cobs package received --");
+                break;
+            }
         }
-
-        let mut b = [0u8; 2];
-        port.read(&mut b[0..1])?;
-        port.read(&mut b[1..2])?;
-
-        let (b0, _) = decode_hamming(b[0]).unwrap();
-        let (b1, _) = decode_hamming(b[1]).unwrap();
-
-        slice[0] = b0 | b1 << 4;
-
-        if slice[0] == ZERO {
-            println!("-- cobs package received --");
-            break;
+        println!("cobs index {}", index);
+        let res = deserialize_crc_cobs::<Ack>(in_buf).unwrap();
+        match res {
+            Ack::Ok => return Ok(res),
+            Ack::Recovered => return Ok(res),
+            Ack::NotOk => {
+                if tries >= 2 {
+                    return Ok(res);
+                }
+                tries += 1;
+            }
         }
+        // Ok(deserialize_crc_cobs(in_buf).unwrap())
     }
-    println!("cobs index {}", index);
-    Ok(deserialize_crc_cobs(in_buf).unwrap())
 }
