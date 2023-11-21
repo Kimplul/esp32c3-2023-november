@@ -1,6 +1,6 @@
 #![cfg_attr(not(test), no_std)]
 #![feature(iter_array_chunks)]
-use hamming::{decode_hamming, encode_hamming};
+use hamming::{encode_hamming};
 use serde_derive::{Deserialize, Serialize};
 pub mod hamming;
 

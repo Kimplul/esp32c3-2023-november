@@ -14,7 +14,7 @@ use std::io::Read;
 
 // Libraries
 use corncobs::ZERO;
-use dateparser::{parse, parse_with_timezone};
+use dateparser::{parse_with_timezone};
 use serial2::SerialPort;
 use std::io;
 use std::io::Write;
@@ -81,7 +81,7 @@ fn main() -> Result<(), std::io::Error> {
             }
         };
 
-        let response = request(&task, &mut port, &mut out_buf, &mut in_buf, bitflip_payload)?;
+        request(&task, &mut port, &mut out_buf, &mut in_buf, bitflip_payload)?;
     }
 
     Ok(())
@@ -163,8 +163,7 @@ fn request(
     let to_write = serialize_crc_cobs(cmd, out_buf);
     println!("Actual : {:?}", to_write);
     if bitflip_payload {
-        // to_write[2] ^= 1 << 1;
-        to_write[4] = 2;
+        to_write[2] ^= 1 << 1;
         println!("Corrup : {:?}", to_write);
     }
     // println!("{:?}", to_write);
