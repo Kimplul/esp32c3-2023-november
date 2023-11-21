@@ -359,12 +359,23 @@ mod app {
     #[task(shared = [reference_times, rtc, timer0, timer1])]
     async fn set_date_time(mut cx: set_date_time::Context, new_time: u64) {
         rprintln!("set_date_time {:?}", new_time);
-        rprintln!("hours {}", new_time / 3600 % 24);
+        rprintln!("received {}:{}:{}", new_time / 3600 % 24,
+                                new_time / 60 % 60,
+                                new_time % 60);
 
         let rtc_ref = cx.shared.rtc.lock(|r| r.get_time_ms());
         cx.shared
             .reference_times
             .lock(|reference_times| reference_times.update(new_time, rtc_ref));
+
+        let current_time =
+        cx.shared
+            .reference_times
+            .lock(|reference_times| reference_times.get_time(rtc_ref));
+
+        rprintln!("current time {}:{}:{}", current_time / 3600 % 24,
+                                current_time / 60 % 60,
+                                current_time % 60);
 
         /* trigger our LED handlers */
         cx.shared.timer1.lock(|t| t.start(0u64.secs()));
@@ -405,8 +416,15 @@ mod app {
                         }
                         /* wait for our time to start with LED off */
                         let time_left = s_time - time_now;
+                        rprintln!("blink time now {}:{}:{}", time_now / 3600 % 24,
+                                  time_now / 60 % 60,
+                                  time_now % 60);
+
+                        rprintln!("blink time start {}:{}:{}", s_time / 3600 % 24,
+                                  s_time / 60 % 60,
+                                  s_time % 60);
                         cx.local.led.set_low().expect("Failed to turn off the led");
-                        cx.shared.timer0.lock(|t| t.start(time_left.secs()));
+                        cx.shared.timer0.lock(|t| t.start(1u64.secs()));
                         // rprintln!("Curr time : {}\nStart_time{}", time_now, s_time);
                         // cx.shared.timer0.lock(|t| t.start(1u64.secs()));
                     }
