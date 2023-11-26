@@ -1,44 +1,18 @@
-# esp32c3-rtic-tau
+# Reliable serial communication project
+Kim Kuparinen, Ville Heikkinen, Aleksi Jarva, Jannatul Nilanti
 
-Repository for `esp32c3-rtic-tau` demonstration and assignments.
+## Serial communication
+- Serializing and deserializing messages works.
+- Implemented Hamming code to fix one bit errors and responses with Recovered status.
+- Detects errors which have more than one bit flipped and responses with NotOk status.
 
-- `esp32c3`, code for the target.
-- `host`, code for the host.
-- `shared`, library for shared data structures and communication between the host and target.
+## Host program
+- CLI application to send messages to the ESP
+- If the host program is started before the ESP the first serial message read by the host is not valid and causes a host panic. This is not wanted behaviour and should be fixed.
 
-## Software requirements
-
-- We flash these examples using `cargo embed`, cargo-subcommand. Obtain the tools by running the following:
-  - `cargo install probe-rs --features cli`
-- Setup udev rules for probe-rs: <https://probe.rs/docs/getting-started/probe-setup/>
-- Refresh udev rules
-  - `sudo udevadm control --reload-rules && sudo udevadm trigger`
-  - WSL2 only: if the above fails on WSL2, run `sudo service udev restart` then try again
-
-## Running the examples
-
-ESP32-C3 programs can be run on the target device as follows.
-
-- Change to target directory:
-  - `cd esp32c3`
-- Use `cargo embed` to build & run an example, e.g.,
-  - `cargo embed --example blinky`
-
-## Using FTDI to connect serial to USB
-
-You cannot put serial wires into a USB port and expect it to work. Therefore we must use a small FTDI2232HL board to
-fill in the gaps.
-
-We setup the board based on the FTDI2232H/HL's datasheet:
-<https://ftdichip.com/wp-content/uploads/2020/07/DS_FT2232H.pdf>
-
-For example, for a setup where IO pin 0 is allocated for UART TX and IO pin 1 is allocated for UART RX, the connections
-between the FTDI and the ESP32-C3 are as follows:
-
-| ESP32-C3 | FTDI |
-| - | - |
-| GND | GND |
-| IO0 | AD1 |
-| IO1 | AD0 |
-
-Be mindful of the fact that the TX from the microcontroller will be the RX for the host and vice versa.
+## ESP features
+- RGB led can be turned on/off and color is decided by the current time on the board.
+- Current time can be set
+- Blink task can be set, either to start now or at given UTC time in the future. Frequency and duration can be set.
+- Time is stored in time stamp representing seconds meaning that blink task can be controlled with accuracy of a second.
+- When using rtc-timer with our implementation of time tracking the time started drifting very quickly. If instead of SystemTimer was used the drifting was not a problem. 
