@@ -11,12 +11,12 @@ mod app {
 
     use esp32c3_hal::{
         self as _,
-        systimer::SystemTimer,
         clock::ClockControl,
         gpio::{Gpio7, Output, PushPull},
         peripherals::{Peripherals, TIMG0, TIMG1, UART0},
         prelude::*,
         rmt::{Channel0, Rmt},
+        systimer::SystemTimer,
         timer::{Timer, Timer0, TimerGroup},
         uart::{
             config::{Config, DataBits, Parity, StopBits},
@@ -326,7 +326,7 @@ mod app {
         rprintln!("Inside set_blink_data task");
 
         cx.shared.blink_data.lock(|blink_data| match options {
-            BlinkerOptions::Off => (),
+            BlinkerOptions::Off => *blink_data = options,
             BlinkerOptions::On {
                 date_time,
                 freq,
@@ -360,22 +360,28 @@ mod app {
     #[task(shared = [reference_times, timer0, timer1])]
     async fn set_date_time(mut cx: set_date_time::Context, new_time: u64) {
         rprintln!("set_date_time {:?}", new_time);
-        rprintln!("received {}:{}:{}", new_time / 3600 % 24,
-                                new_time / 60 % 60,
-                                new_time % 60);
+        rprintln!(
+            "received {}:{}:{}",
+            new_time / 3600 % 24,
+            new_time / 60 % 60,
+            new_time % 60
+        );
 
         cx.shared
             .reference_times
             .lock(|reference_times| reference_times.update(new_time));
 
-        let current_time =
-        cx.shared
+        let current_time = cx
+            .shared
             .reference_times
             .lock(|reference_times| reference_times.get_time());
 
-        rprintln!("current time {}:{}:{}", current_time / 3600 % 24,
-                                current_time / 60 % 60,
-                                current_time % 60);
+        rprintln!(
+            "current time {}:{}:{}",
+            current_time / 3600 % 24,
+            current_time / 60 % 60,
+            current_time % 60
+        );
 
         /* trigger our LED handlers */
         cx.shared.timer1.lock(|t| t.start(0u64.secs()));
@@ -415,9 +421,12 @@ mod app {
                         }
                         /* wait for our time to start with LED off, print out current time once per
                          * second to make sure we're not drifting too badly */
-                        rprintln!("blink time now {}:{}:{}", time_now / 3600 % 24,
-                                  time_now / 60 % 60,
-                                  time_now % 60);
+                        rprintln!(
+                            "blink time now {}:{}:{}",
+                            time_now / 3600 % 24,
+                            time_now / 60 % 60,
+                            time_now % 60
+                        );
 
                         cx.local.led.set_low().expect("Failed to turn off the led");
                         cx.shared.timer0.lock(|t| t.start(1u64.secs()));
