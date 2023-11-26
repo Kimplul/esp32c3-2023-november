@@ -11,6 +11,7 @@ mod app {
 
     use esp32c3_hal::{
         self as _,
+        systimer::SystemTimer,
         clock::ClockControl,
         gpio::{Gpio7, Output, PushPull},
         peripherals::{Peripherals, TIMG0, TIMG1, UART0},
@@ -21,7 +22,7 @@ mod app {
             config::{Config, DataBits, Parity, StopBits},
             TxRxPins, UartRx, UartTx,
         },
-        Rtc, Uart, IO,
+        Uart, IO,
     };
 
     use esp_hal_smartled::{smartLedAdapter, SmartLedsAdapter};
@@ -41,23 +42,26 @@ mod app {
 
     pub struct ReferenceTimes {
         utc_reference: u64,
-        rtc_reference: u64,
+        sys_reference: u64,
     }
 
     impl ReferenceTimes {
-        fn update(&mut self, utc_ref: u64, rtc_ref: u64) {
-            self.rtc_reference = rtc_ref;
+        fn update(&mut self, utc_ref: u64) {
+            self.sys_reference = SystemTimer::now();
             self.utc_reference = utc_ref;
         }
 
-        pub fn get_time(&mut self, rtc_now: u64) -> u64 {
-            self.utc_reference + (rtc_now - self.rtc_reference) / 1000
+        pub fn get_time(&mut self) -> u64 {
+            let elapsed = SystemTimer::now() - self.sys_reference;
+            let ticks = SystemTimer::TICKS_PER_SECOND;
+            // do division with rounding to nearest
+            self.utc_reference + ((elapsed + (ticks - 1)) / ticks)
         }
 
         pub fn new() -> Self {
             ReferenceTimes {
                 utc_reference: 0,
-                rtc_reference: 0,
+                sys_reference: 0,
             }
         }
     }
@@ -74,7 +78,6 @@ mod app {
         rgb_state: RgbState,
         blink_data: BlinkerOptions,
         reference_times: ReferenceTimes,
-        rtc: Rtc<'static>,
         timer0: Timer<Timer0<TIMG0>>,
         timer1: Timer<Timer0<TIMG1>>,
     }
@@ -164,7 +167,6 @@ mod app {
                 cmd: [0; OUT_SIZE],
                 rgb_state: RgbState::Off,
                 reference_times: ReferenceTimes::new(),
-                rtc: Rtc::new(peripherals.RTC_CNTL),
                 timer0,
                 timer1,
             },
@@ -319,7 +321,7 @@ mod app {
         }
     }
 
-    #[task(shared = [blink_data, timer0, rtc, reference_times])]
+    #[task(shared = [blink_data, timer0, reference_times])]
     async fn set_blink_data(mut cx: set_blink_data::Context, options: BlinkerOptions) {
         rprintln!("Inside set_blink_data task");
 
@@ -331,8 +333,7 @@ mod app {
                 duration,
             } => match date_time {
                 DateTime::Now => {
-                    let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
-                    let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+                    let time_now = cx.shared.reference_times.lock(|r| r.get_time());
                     *blink_data = BlinkerOptions::On {
                         date_time: DateTime::Utc(time_now),
                         freq,
@@ -356,22 +357,21 @@ mod app {
         cx.shared.timer1.lock(|t| t.start(0u64.secs()));
     }
 
-    #[task(shared = [reference_times, rtc, timer0, timer1])]
+    #[task(shared = [reference_times, timer0, timer1])]
     async fn set_date_time(mut cx: set_date_time::Context, new_time: u64) {
         rprintln!("set_date_time {:?}", new_time);
         rprintln!("received {}:{}:{}", new_time / 3600 % 24,
                                 new_time / 60 % 60,
                                 new_time % 60);
 
-        let rtc_ref = cx.shared.rtc.lock(|r| r.get_time_ms());
         cx.shared
             .reference_times
-            .lock(|reference_times| reference_times.update(new_time, rtc_ref));
+            .lock(|reference_times| reference_times.update(new_time));
 
         let current_time =
         cx.shared
             .reference_times
-            .lock(|reference_times| reference_times.get_time(rtc_ref));
+            .lock(|reference_times| reference_times.get_time());
 
         rprintln!("current time {}:{}:{}", current_time / 3600 % 24,
                                 current_time / 60 % 60,
@@ -382,7 +382,7 @@ mod app {
         cx.shared.timer0.lock(|t| t.start(0u64.secs()));
     }
 
-    #[task(binds = TG0_T0_LEVEL,local=[led], shared=[timer0, blink_data, rtc, reference_times], priority=1)]
+    #[task(binds = TG0_T0_LEVEL,local=[led], shared=[timer0, blink_data, reference_times])]
     fn blink(mut cx: blink::Context) {
         rprintln!("Inside blink task");
         cx.shared.timer0.lock(|t| t.clear_interrupt());
@@ -397,8 +397,7 @@ mod app {
                 freq,
                 duration,
             } => {
-                let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
-                let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+                let time_now = cx.shared.reference_times.lock(|r| r.get_time());
 
                 match date_time {
                     DateTime::Now => panic!("Should never end here"), // Should never be this variant
@@ -414,15 +413,12 @@ mod app {
                             cx.shared.timer0.lock(|t| t.start(period.millis()));
                             return;
                         }
-                        /* wait for our time to start with LED off */
-                        let time_left = s_time - time_now;
+                        /* wait for our time to start with LED off, print out current time once per
+                         * second to make sure we're not drifting too badly */
                         rprintln!("blink time now {}:{}:{}", time_now / 3600 % 24,
                                   time_now / 60 % 60,
                                   time_now % 60);
 
-                        rprintln!("blink time start {}:{}:{}", s_time / 3600 % 24,
-                                  s_time / 60 % 60,
-                                  s_time % 60);
                         cx.local.led.set_low().expect("Failed to turn off the led");
                         cx.shared.timer0.lock(|t| t.start(1u64.secs()));
                         // rprintln!("Curr time : {}\nStart_time{}", time_now, s_time);
@@ -433,7 +429,7 @@ mod app {
         }
     }
 
-    #[task(binds=TG1_T0_LEVEL, local=[rgb_led], shared=[rtc, reference_times, timer1,rgb_state])]
+    #[task(binds=TG1_T0_LEVEL, local=[rgb_led], shared=[reference_times, timer1,rgb_state])]
     fn update_rgb(mut cx: update_rgb::Context) {
         cx.shared.timer1.lock(|t| t.clear_interrupt());
 
@@ -443,8 +439,7 @@ mod app {
         });
 
         if state {
-            let rtc_now = cx.shared.rtc.lock(|rtc| rtc.get_time_ms());
-            let time_now = cx.shared.reference_times.lock(|r| r.get_time(rtc_now));
+            let time_now = cx.shared.reference_times.lock(|r| r.get_time());
             let hours = time_now / 3600 % 24;
 
             let color = match hours {
